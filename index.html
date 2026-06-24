@@ -1,0 +1,823 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Flight Following Analyzer</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+/* ── RESET & BASE ───────────────────────────────────────────────────────── */
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;overflow:hidden;font-family:Arial,sans-serif;background:#111;color:#ddd;}
+
+/* ── LAYOUT ─────────────────────────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100vh;}
+#header{flex:0 0 auto;background:linear-gradient(135deg,#1F4E79,#2E75B6);
+        padding:8px 14px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;}
+#header h1{font-size:15px;color:#fff;font-weight:700;white-space:nowrap;}
+#header p{font-size:10px;color:#90CAF9;}
+#body{flex:1 1 auto;display:flex;overflow:hidden;}
+#map{flex:1 1 auto;}
+#panel{flex:0 0 310px;background:#1a1a2e;overflow-y:auto;display:flex;flex-direction:column;
+       border-left:1px solid #2a2a4a;}
+
+/* ── PANEL SECTIONS ─────────────────────────────────────────────────────── */
+.section{border-bottom:1px solid #2a2a4a;padding:10px 12px;}
+.section-title{font-size:11px;font-weight:700;color:#90CAF9;letter-spacing:.6px;
+               text-transform:uppercase;margin-bottom:8px;display:flex;align-items:center;gap:6px;}
+.section-title .badge{background:#2E75B6;color:#fff;font-size:9px;padding:1px 6px;border-radius:8px;}
+
+/* ── UPLOAD ─────────────────────────────────────────────────────────────── */
+#drop-zone{border:2px dashed #2E75B6;border-radius:8px;padding:16px;text-align:center;
+           cursor:pointer;transition:.2s;color:#888;font-size:12px;}
+#drop-zone:hover,#drop-zone.drag-over{border-color:#66BB6A;color:#66BB6A;background:rgba(102,187,106,.07);}
+#drop-zone input{display:none;}
+#file-status{font-size:11px;margin-top:6px;color:#66BB6A;display:none;}
+
+/* ── BUTTONS ─────────────────────────────────────────────────────────────── */
+.btn{padding:6px 11px;border:none;border-radius:5px;cursor:pointer;font-size:11px;
+     font-weight:600;transition:.15s;white-space:nowrap;}
+.btn-blue{background:#1E88E5;color:#fff;}.btn-blue:hover{background:#1565C0;}
+.btn-green{background:#43A047;color:#fff;}.btn-green:hover{background:#2E7D32;}
+.btn-orange{background:#FB8C00;color:#fff;}.btn-orange:hover{background:#E65100;}
+.btn-red{background:#E53935;color:#fff;}.btn-red:hover{background:#C62828;}
+.btn-grey{background:#37474F;color:#ddd;}.btn-grey:hover{background:#455A64;}
+.btn-active{background:#FFA726!important;color:#000!important;}
+.btn-edit-active{background:#66BB6A!important;color:#000!important;}
+.btn-row{display:flex;gap:5px;flex-wrap:wrap;}
+.btn-full{width:100%;margin-top:5px;}
+
+/* ── CHECKBOXES ─────────────────────────────────────────────────────────── */
+.check-item{display:flex;align-items:center;gap:7px;padding:3px 0;font-size:11px;cursor:pointer;}
+.check-item input{width:14px;height:14px;cursor:pointer;accent-color:#2E75B6;}
+.check-item .dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+.check-all{font-size:10px;color:#90CAF9;cursor:pointer;text-decoration:underline;margin-bottom:4px;display:inline-block;}
+
+/* ── DUAL RANGE SLIDER ──────────────────────────────────────────────────── */
+.slider-wrap{position:relative;height:36px;margin:6px 0 2px;}
+.slider-track{position:absolute;top:50%;left:0;right:0;height:5px;
+              background:#333;border-radius:3px;transform:translateY(-50%);}
+.slider-fill{position:absolute;height:100%;background:#1E88E5;border-radius:3px;}
+.slider-marker{position:absolute;top:-8px;width:2px;background:#FFA726;height:21px;opacity:.8;}
+.slider-marker-lbl{position:absolute;top:-20px;font-size:8px;color:#FFA726;
+                   transform:translateX(-50%);white-space:nowrap;}
+.slider-wrap input[type=range]{position:absolute;width:100%;top:50%;transform:translateY(-50%);
+  background:transparent;-webkit-appearance:none;appearance:none;pointer-events:none;outline:none;}
+.slider-wrap input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:16px;height:16px;border-radius:50%;
+  background:#1E88E5;pointer-events:all;cursor:pointer;border:2px solid #fff;
+  box-shadow:0 0 4px rgba(0,0,0,.6);}
+.slider-wrap input[type=range]::-moz-range-thumb{
+  width:16px;height:16px;border-radius:50%;background:#1E88E5;
+  pointer-events:all;cursor:pointer;border:2px solid #fff;}
+.slider-vals{display:flex;justify-content:space-between;font-size:11px;color:#aaa;margin-top:2px;}
+.slider-vals span{color:#fff;font-weight:700;}
+.lat-legend{display:flex;gap:4px;margin:6px 0 2px;align-items:center;}
+.lat-swatch{height:10px;border-radius:2px;flex:1;font-size:0;}
+.lat-legend-lbl{font-size:9px;color:#777;display:flex;justify-content:space-between;margin-bottom:2px;}
+
+/* ── STATS ───────────────────────────────────────────────────────────────── */
+.stat-row{display:flex;justify-content:space-between;font-size:11px;padding:2px 0;}
+.stat-label{color:#888;}
+.stat-val{color:#fff;font-weight:600;}
+.stat-val.ok{color:#66BB6A;}.stat-val.warn{color:#FFA726;}.stat-val.alert{color:#EF5350;}
+
+/* ── MAP OVERLAYS ────────────────────────────────────────────────────────── */
+#map-hint{display:none;position:absolute;bottom:36px;left:50%;transform:translateX(-50%);
+  background:rgba(102,187,106,.93);color:#000;font-size:12px;font-weight:700;
+  padding:8px 18px;border-radius:20px;z-index:2000;pointer-events:none;text-align:center;}
+#draw-status{display:none;position:absolute;top:12px;left:50%;transform:translateX(-50%);
+  background:rgba(0,0,0,.85);color:#66BB6A;font-size:12px;font-weight:700;
+  padding:7px 16px;border-radius:8px;z-index:2000;border:1px solid #66BB6A;}
+
+/* ── MISC ────────────────────────────────────────────────────────────────── */
+.dimtext{font-size:10px;color:#666;font-style:italic;margin-top:4px;}
+.warn-box{background:rgba(251,140,0,.12);border:1px solid #FB8C00;border-radius:5px;
+          padding:7px 9px;font-size:10px;color:#FFA726;margin-top:5px;display:none;}
+hr.dim{border:none;border-top:1px solid #2a2a4a;margin:6px 0;}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;padding:3px 0;}
+.toggle-row label{font-size:11px;color:#ccc;cursor:pointer;}
+.toggle{position:relative;width:36px;height:18px;display:inline-block;}
+.toggle input{opacity:0;width:0;height:0;}
+.toggle-slider{position:absolute;inset:0;background:#333;border-radius:9px;cursor:pointer;transition:.2s;}
+.toggle-slider:before{content:"";position:absolute;width:14px;height:14px;left:2px;top:2px;
+  background:#fff;border-radius:50%;transition:.2s;}
+.toggle input:checked+.toggle-slider{background:#1E88E5;}
+.toggle input:checked+.toggle-slider:before{transform:translateX(18px);}
+.mode-pill{display:flex;background:#111;border-radius:6px;overflow:hidden;border:1px solid #333;}
+.mode-pill button{flex:1;padding:5px 8px;border:none;background:transparent;color:#888;
+  font-size:10px;font-weight:600;cursor:pointer;transition:.15s;}
+.mode-pill button.active{background:#1E88E5;color:#fff;}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="header">
+  <div><h1>&#9992; Flight Following Analyzer</h1>
+       <p>Upload a SkyTrac position CSV to begin &nbsp;|&nbsp; Draw a talk group region to check coverage</p></div>
+  <div class="btn-row">
+    <button class="btn btn-grey" onclick="document.getElementById('csv-file').click()">&#128194; Load CSV</button>
+    <button class="btn btn-grey" id="mode-heat-btn" onclick="setDisplayMode('heat')">Heatmap</button>
+    <button class="btn btn-grey btn-active" id="mode-scatter-btn" onclick="setDisplayMode('scatter')">Scatter</button>
+  </div>
+</div>
+<div id="body">
+  <div id="map"></div>
+  <!-- ─── SIDE PANEL ─────────────────────────────────────────────────── -->
+  <div id="panel">
+
+    <!-- UPLOAD -->
+    <div class="section">
+      <div class="section-title">&#128196; Data</div>
+      <div id="drop-zone" onclick="document.getElementById('csv-file').click()"
+           ondragover="event.preventDefault();this.classList.add('drag-over')"
+           ondragleave="this.classList.remove('drag-over')"
+           ondrop="handleDrop(event)">
+        <input type="file" id="csv-file" accept=".csv" onchange="loadFile(this.files[0])">
+        &#128229; Drop CSV here or click to browse<br>
+        <span style="font-size:10px">Required: CallSign, PosnTime, Latitude, Longitude</span>
+      </div>
+      <div id="file-status">&#10003; <span id="file-name"></span></div>
+      <div class="stat-row" style="margin-top:6px">
+        <span class="stat-label">Records loaded</span><span class="stat-val" id="stat-total">—</span></div>
+      <div class="stat-row">
+        <span class="stat-label">Visible after filters</span><span class="stat-val ok" id="stat-visible">—</span></div>
+      <div class="stat-row">
+        <span class="stat-label">High latency (&gt;120s) visible</span><span class="stat-val warn" id="stat-high">—</span></div>
+      <div class="stat-row">
+        <span class="stat-label">Out-of-region visible</span><span class="stat-val alert" id="stat-out">—</span></div>
+    </div>
+
+    <!-- AIRCRAFT FILTER -->
+    <div class="section">
+      <div class="section-title">&#9992; Aircraft <span class="badge" id="ac-badge">0</span></div>
+      <span class="check-all" onclick="setAllAircraft(true)">All</span> &nbsp;
+      <span class="check-all" onclick="setAllAircraft(false)">None</span>
+      <div id="aircraft-list"><p class="dimtext">Load a CSV to see aircraft</p></div>
+    </div>
+
+    <!-- LATENCY FILTER -->
+    <div class="section">
+      <div class="section-title">&#9201; Latency Filter</div>
+      <div class="lat-legend-lbl"><span>0 s</span><span>120 s</span><span id="lat-max-lbl">3600 s</span></div>
+      <div class="lat-legend">
+        <div class="lat-swatch" style="background:linear-gradient(to right,#4CAF50,#FFC107,#FF5722,#B71C1C)"></div>
+      </div>
+      <div class="slider-wrap" id="slider-wrap">
+        <div class="slider-track"><div class="slider-fill" id="slider-fill"></div></div>
+        <div class="slider-marker" id="marker-120"><span class="slider-marker-lbl">120s</span></div>
+        <input type="range" id="range-lo" min="0" max="3600" value="0" oninput="onRangeChange()">
+        <input type="range" id="range-hi" min="0" max="3600" value="3600" oninput="onRangeChange()">
+      </div>
+      <div class="slider-vals">
+        Min: <span id="val-lo">0s</span> &nbsp;&nbsp; Max: <span id="val-hi">3600s</span>
+      </div>
+      <div class="toggle-row" style="margin-top:6px">
+        <label for="chk-nodata">Include no-data records (latency = -1 / null)</label>
+        <label class="toggle"><input type="checkbox" id="chk-nodata" checked onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label for="chk-negative">Include negative latency (buffered stale msgs)</label>
+        <label class="toggle"><input type="checkbox" id="chk-negative" onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <hr class="dim">
+      <div style="font-size:10px;color:#666">
+        Points outside the selected range are hidden. Grey dots = no latency data.
+        The <span style="color:#FFA726">120s</span> mark is the high-latency threshold.
+      </div>
+    </div>
+
+    <!-- FLIGHT TYPE FILTER -->
+    <div class="section">
+      <div class="section-title">&#128268; Flight Type Filter</div>
+      <div class="toggle-row">
+        <label for="chk-flights">Include normal flights</label>
+        <label class="toggle"><input type="checkbox" id="chk-flights" checked onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label for="chk-ground">Include ground runs</label>
+        <label class="toggle"><input type="checkbox" id="chk-ground" checked onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label for="chk-outliers">Include outlier power cycles <span style="color:#EF5350">(all-high-lat)</span></label>
+        <label class="toggle"><input type="checkbox" id="chk-outliers" checked onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label for="chk-unknown">Include unclassified sessions</label>
+        <label class="toggle"><input type="checkbox" id="chk-unknown" checked onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <hr class="dim">
+      <div style="font-size:10px;color:#666;line-height:1.5">
+        <b style="color:#ccc">Ground run:</b> power cycle with no airborne event and &lt;150 ft altitude change.<br>
+        <b style="color:#ccc">Outlier cycle:</b> &gt;80% of messages in a session have latency &gt;120s.
+      </div>
+      <div id="session-stats" style="display:none;margin-top:6px">
+        <div class="stat-row"><span class="stat-label">Normal flights</span><span class="stat-val ok" id="ss-flights">0</span></div>
+        <div class="stat-row"><span class="stat-label">Ground runs</span><span class="stat-val warn" id="ss-ground">0</span></div>
+        <div class="stat-row"><span class="stat-label">Outlier cycles</span><span class="stat-val alert" id="ss-outliers">0</span></div>
+        <div class="stat-row"><span class="stat-label">Unclassified</span><span class="stat-val" id="ss-unknown">0</span></div>
+      </div>
+    </div>
+
+    <!-- REGION / POLYGON -->
+    <div class="section">
+      <div class="section-title">&#128506; Talk Group Region</div>
+      <div class="btn-row">
+        <button class="btn btn-blue" id="btn-draw" onclick="startDraw()">&#9998; Draw Region</button>
+        <button class="btn btn-grey" id="btn-edit-poly" onclick="toggleEditPoly()" style="display:none">Edit Corners</button>
+        <button class="btn btn-red" id="btn-clear-poly" onclick="clearPolygon()" style="display:none">&#128465; Clear</button>
+      </div>
+      <div class="warn-box" id="no-poly-warn">Draw a region first to enable out-of-region detection.</div>
+      <div class="toggle-row" style="margin-top:8px">
+        <label for="chk-out-region">Highlight out-of-region positions</label>
+        <label class="toggle"><input type="checkbox" id="chk-out-region" onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div class="toggle-row">
+        <label for="chk-hide-out">Hide out-of-region entirely</label>
+        <label class="toggle"><input type="checkbox" id="chk-hide-out" onchange="renderVisible()">
+          <span class="toggle-slider"></span></label>
+      </div>
+      <div id="poly-coords" style="display:none;margin-top:6px;font-size:9px;color:#888;word-break:break-all"></div>
+      <button class="btn btn-grey btn-full" style="display:none;margin-top:4px;font-size:10px"
+              id="btn-copy-poly" onclick="copyPolyCoords()">&#128203; Copy region coordinates</button>
+    </div>
+
+    <!-- COLOR KEY -->
+    <div class="section">
+      <div class="section-title">&#127775; Color Key (Scatter)</div>
+      <div class="check-item"><div class="dot" style="background:#4CAF50"></div> Low latency (0–30s)</div>
+      <div class="check-item"><div class="dot" style="background:#FFC107"></div> Moderate (30–120s)</div>
+      <div class="check-item"><div class="dot" style="background:#FF5722"></div> High latency (&gt;120s)</div>
+      <div class="check-item"><div class="dot" style="background:#9E9E9E"></div> No / invalid latency data</div>
+      <div class="check-item"><div class="dot" style="background:#E91E63;border:2px dashed #fff"></div> Out-of-region (when highlighted)</div>
+      <div class="check-item"><div class="dot" style="background:#4CAF50;opacity:.3;border:2px dashed #aaa"></div> Session filtered out</div>
+    </div>
+
+  </div><!-- /panel -->
+</div><!-- /body -->
+</div><!-- /app -->
+
+<!-- Map overlays -->
+<div id="map-hint">Click to add vertices &nbsp;|&nbsp; Double-click or press <b>Enter</b> to finish &nbsp;|&nbsp; <b>Esc</b> to cancel</div>
+<div id="draw-status"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════════════════════════
+// MAP INIT
+// ═══════════════════════════════════════════════════════════════════════════
+var map = L.map('map',{center:[42,-76],zoom:6});
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  {attribution:'© OpenStreetMap © CARTO',maxZoom:19}).addTo(map);
+
+var canvasRenderer = L.canvas({padding:0.5});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════════════════════════
+var rawRows    = [];   // parsed CSV rows
+var processed  = [];   // enriched rows
+var sessions   = [];   // grouped power cycles
+var acColors   = {};   // callsign -> color
+var acChecked  = {};   // callsign -> bool
+
+var heatLayer   = null;
+var scatterLayer= L.layerGroup().addTo(map);
+var outLayer    = L.layerGroup().addTo(map);
+var polyLayer   = null;
+var cornerGroup = L.layerGroup().addTo(map);
+
+var polygonPts  = [];  // [[lat,lng],...]
+var drawMode    = false;
+var drawTempPts = [];
+var drawTempLine= null;
+var drawTempMarkers=[];
+var editPolyMode= false;
+var displayMode = 'scatter'; // 'scatter' or 'heat'
+
+var FLIGHT_EVENTS = ['wheelsoff','airborne','liftoff','enroute','departure','inflight','takeoff','climbout'];
+var SESSION_GAP_H = 4;  // hours between sessions
+var OUTLIER_THRESH = 0.80; // 80% high-lat = outlier
+var ALT_FLIGHT_THRESH = 150; // ft
+
+var AC_PALETTE = ['#EF5350','#1E88E5','#43A047','#FB8C00','#8E24AA','#00ACC1',
+                  '#F4511E','#6D4C41','#546E7A','#C0CA33','#26A69A','#7E57C2'];
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CSV LOADING
+// ═══════════════════════════════════════════════════════════════════════════
+function handleDrop(e){
+  e.preventDefault();
+  document.getElementById('drop-zone').classList.remove('drag-over');
+  var f=e.dataTransfer.files[0];
+  if(f) loadFile(f);
+}
+
+function loadFile(file){
+  if(!file) return;
+  Papa.parse(file,{
+    header:true, skipEmptyLines:true,
+    complete:function(res){
+      document.getElementById('file-name').textContent=file.name+' ('+res.data.length+' rows)';
+      document.getElementById('file-status').style.display='block';
+      processData(res.data);
+    },
+    error:function(e){alert('CSV parse error: '+e.message);}
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DATA PROCESSING
+// ═══════════════════════════════════════════════════════════════════════════
+function processData(rows){
+  // Normalise column names (case-insensitive)
+  var sampleKeys=Object.keys(rows[0]);
+  function col(r,names){
+    for(var n of names){
+      for(var k of sampleKeys) if(k.toLowerCase()===n.toLowerCase()) return r[k];
+    }
+    return undefined;
+  }
+
+  // Parse & enrich
+  processed=[];
+  rows.forEach(function(r,i){
+    var lat=parseFloat(col(r,['Latitude','lat']));
+    var lng=parseFloat(col(r,['Longitude','lon','long','lng']));
+    if(isNaN(lat)||isNaN(lng)||lat===0&&lng===0) return;
+
+    var latRaw=col(r,['Latency','latency']);
+    var latNum=parseFloat(latRaw);
+    var latency=isNaN(latNum)?null:latNum;
+
+    var altRaw=col(r,['Altitude','altitude','alt']);
+    var alt=parseFloat(altRaw)||0;
+
+    processed.push({
+      idx:i,
+      cs:    (col(r,['CallSign','callsign','tail','aircraft','registration'])||'UNKNOWN').trim(),
+      time:  new Date(col(r,['PosnTime','time','datetime','timestamp','date'])||''),
+      lat:lat, lng:lng, alt:alt,
+      event: (col(r,['PosnEvent','posnevent','event'])||'').toLowerCase(),
+      latency:latency,
+      posnType: col(r,['PosnType','posntype','type'])||'',
+      sessionId:null,
+      sessionType:null,  // 'flight'|'ground'|'outlier'|'unknown'
+      inRegion:true,
+    });
+  });
+
+  processed.sort(function(a,b){
+    if(a.cs!==b.cs) return a.cs<b.cs?-1:1;
+    return a.time-b.time;
+  });
+
+  buildSessions();
+  buildAircraftList();
+  updateRegionFlags();
+  document.getElementById('stat-total').textContent=processed.length.toLocaleString();
+  document.getElementById('session-stats').style.display='block';
+  updateSessionStats();
+
+  fitMapToBounds();
+  renderVisible();
+}
+
+function buildSessions(){
+  sessions=[];
+  var sid=0;
+  var curSession=null;
+  var curCs=null;
+
+  processed.forEach(function(p,i){
+    var newSession=false;
+    if(p.cs!==curCs){ newSession=true; }
+    else if(curSession){
+      var lastP=processed[curSession.endIdx];
+      if((p.time-lastP.time)>SESSION_GAP_H*3600000) newSession=true;
+    }
+    if(p.event==='transceiveroff'||p.event==='enginestop') newSession=true; // end of session handled at start of next
+
+    if(newSession){
+      if(curSession) finaliseSession(curSession);
+      curSession={id:sid++,cs:p.cs,startIdx:i,endIdx:i,rows:[p]};
+      curCs=p.cs;
+    } else {
+      curSession.endIdx=i;
+      curSession.rows.push(p);
+    }
+    p.sessionId=curSession.id;
+  });
+  if(curSession) finaliseSession(curSession);
+}
+
+function finaliseSession(s){
+  var rows=s.rows;
+  // Check for airborne events
+  var hasAirborne=rows.some(function(r){ return FLIGHT_EVENTS.some(function(fe){ return r.event.indexOf(fe)>=0; }); });
+  // Check altitude variation
+  var alts=rows.map(function(r){return r.alt;}).filter(function(a){return a>0;});
+  var altSpread=(alts.length>1)?(Math.max.apply(null,alts)-Math.min.apply(null,alts)):0;
+  // Check outlier (>80% high latency)
+  var validLat=rows.filter(function(r){return r.latency!==null&&r.latency>=0;});
+  var highFrac=validLat.length>2?(validLat.filter(function(r){return r.latency>120;}).length/validLat.length):0;
+
+  var isFlight = hasAirborne || altSpread >= ALT_FLIGHT_THRESH;
+  var isOutlier = validLat.length>2 && highFrac>=OUTLIER_THRESH;
+  var type = isOutlier?'outlier':(isFlight?'flight':(rows.length>1?'ground':'unknown'));
+
+  rows.forEach(function(r){ r.sessionType=type; });
+  s.type=type;
+  sessions.push(s);
+}
+
+function buildAircraftList(){
+  var acs=[...new Set(processed.map(function(r){return r.cs;}))].sort();
+  acColors={};
+  acs.forEach(function(a,i){ acColors[a]=AC_PALETTE[i%AC_PALETTE.length]; });
+
+  // Preserve existing checked state
+  var prevChecked=Object.assign({},acChecked);
+  acChecked={};
+  acs.forEach(function(a){ acChecked[a]=(prevChecked[a]!==undefined)?prevChecked[a]:true; });
+
+  var list=document.getElementById('aircraft-list');
+  list.innerHTML='';
+  acs.forEach(function(a){
+    var cnt=processed.filter(function(r){return r.cs===a;}).length;
+    var div=document.createElement('div');
+    div.className='check-item';
+    div.innerHTML='<input type="checkbox" id="ac-'+a+'" '+(acChecked[a]?'checked':'')+' onchange="acToggle(\''+a+'\')">'+
+      '<div class="dot" style="background:'+acColors[a]+'"></div>'+
+      '<label for="ac-'+a+'" style="flex:1;cursor:pointer">'+a+'</label>'+
+      '<span style="font-size:10px;color:#666">'+cnt+'</span>';
+    list.appendChild(div);
+  });
+  document.getElementById('ac-badge').textContent=acs.length;
+}
+
+function acToggle(cs){
+  acChecked[cs]=document.getElementById('ac-'+cs).checked;
+  renderVisible();
+}
+function setAllAircraft(v){
+  Object.keys(acChecked).forEach(function(a){ acChecked[a]=v; document.getElementById('ac-'+a).checked=v; });
+  renderVisible();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FILTERS
+// ═══════════════════════════════════════════════════════════════════════════
+function getLatRange(){
+  var lo=parseInt(document.getElementById('range-lo').value);
+  var hi=parseInt(document.getElementById('range-hi').value);
+  if(lo>hi){var t=lo;lo=hi;hi=t;}
+  return{lo:lo,hi:hi};
+}
+
+function rowVisible(r){
+  // Aircraft filter
+  if(!acChecked[r.cs]) return false;
+  // Session type
+  var t=r.sessionType||'unknown';
+  if(t==='flight'    && !document.getElementById('chk-flights').checked)  return false;
+  if(t==='ground'    && !document.getElementById('chk-ground').checked)   return false;
+  if(t==='outlier'   && !document.getElementById('chk-outliers').checked) return false;
+  if(t==='unknown'   && !document.getElementById('chk-unknown').checked)  return false;
+  // Latency filter
+  var rng=getLatRange();
+  var lat=r.latency;
+  if(lat===null||lat===undefined){
+    if(!document.getElementById('chk-nodata').checked) return false;
+    return true;
+  }
+  if(lat<0){
+    if(!document.getElementById('chk-negative').checked) return false;
+    return true;
+  }
+  if(lat<rng.lo||lat>rng.hi) return false;
+  // Out-of-region hide
+  if(!r.inRegion && document.getElementById('chk-hide-out').checked) return false;
+  return true;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// RENDERING
+// ═══════════════════════════════════════════════════════════════════════════
+var renderTimer=null;
+function renderVisible(){
+  clearTimeout(renderTimer);
+  renderTimer=setTimeout(_renderVisible,80);
+}
+
+function latColor(lat){
+  if(lat===null||lat===undefined||lat<0) return'#9E9E9E';
+  if(lat<=30)  return'#4CAF50';
+  if(lat<=120) return'#FFC107';
+  return'#FF5722';
+}
+
+function _renderVisible(){
+  if(!processed.length) return;
+  var visible=processed.filter(rowVisible);
+  var outOfReg=visible.filter(function(r){return !r.inRegion;});
+
+  // Stats
+  document.getElementById('stat-visible').textContent=visible.length.toLocaleString();
+  var highCnt=visible.filter(function(r){return r.latency!==null&&r.latency>120;}).length;
+  document.getElementById('stat-high').textContent=highCnt.toLocaleString();
+  document.getElementById('stat-out').textContent=
+    polygonPts.length<3?'—':outOfReg.length.toLocaleString()+' ('+
+    (visible.length?Math.round(100*outOfReg.length/visible.length):0)+'%)';
+
+  // Clear layers
+  scatterLayer.clearLayers();
+  if(heatLayer){ map.removeLayer(heatLayer); heatLayer=null; }
+  outLayer.clearLayers();
+
+  if(displayMode==='heat'){
+    var heatData=visible.map(function(r){
+      var w=r.latency&&r.latency>0?Math.min(r.latency/600,1):0.1;
+      return[r.lat,r.lng,w];
+    });
+    heatLayer=L.heatLayer(heatData,{radius:16,blur:20,maxZoom:14,max:1.0,
+      gradient:{0.1:'#0D47A1',0.3:'#1976D2',0.5:'#4CAF50',0.7:'#FFC107',0.9:'#FF5722',1.0:'#B71C1C'}
+    }).addTo(map);
+  } else {
+    // Scatter
+    visible.forEach(function(r){
+      var col=latColor(r.latency);
+      var out=!r.inRegion&&document.getElementById('chk-out-region').checked;
+      var m=L.circleMarker([r.lat,r.lng],{
+        renderer:canvasRenderer,
+        radius:4,
+        color:      out?'#E91E63':col,
+        fillColor:  out?'#F48FB1':col,
+        fillOpacity:0.75,
+        weight:     out?2:0.5,
+      });
+      var tip='<b>'+r.cs+'</b><br>'+
+        (r.time.getTime()?r.time.toISOString().replace('T',' ').slice(0,19):'')+
+        '<br>Lat: '+r.lat.toFixed(4)+'  Lng: '+r.lng.toFixed(4)+
+        '<br>Alt: '+(r.alt||'—')+' ft'+
+        '<br>Latency: '+(r.latency!==null?r.latency+'s':'—')+
+        '<br>Event: '+(r.event||'—')+
+        '<br>Session: '+r.sessionType;
+      m.bindTooltip(tip,{sticky:true});
+      scatterLayer.addLayer(m);
+    });
+  }
+}
+
+function setDisplayMode(m){
+  displayMode=m;
+  document.getElementById('mode-heat-btn').className='btn btn-grey'+(m==='heat'?' btn-active':'');
+  document.getElementById('mode-scatter-btn').className='btn btn-grey'+(m==='scatter'?' btn-active':'');
+  renderVisible();
+}
+
+function updateSessionStats(){
+  var counts={flight:0,ground:0,outlier:0,unknown:0};
+  sessions.forEach(function(s){ counts[s.type]=(counts[s.type]||0)+1; });
+  document.getElementById('ss-flights').textContent=counts.flight||0;
+  document.getElementById('ss-ground').textContent=counts.ground||0;
+  document.getElementById('ss-outliers').textContent=counts.outlier||0;
+  document.getElementById('ss-unknown').textContent=counts.unknown||0;
+}
+
+function fitMapToBounds(){
+  if(!processed.length) return;
+  var lats=processed.map(function(r){return r.lat;});
+  var lngs=processed.map(function(r){return r.lng;});
+  map.fitBounds([[Math.min.apply(null,lats),Math.min.apply(null,lngs)],
+                 [Math.max.apply(null,lats),Math.max.apply(null,lngs)]],{padding:[20,20]});
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// DUAL RANGE SLIDER
+// ═══════════════════════════════════════════════════════════════════════════
+function onRangeChange(){
+  var lo=parseInt(document.getElementById('range-lo').value);
+  var hi=parseInt(document.getElementById('range-hi').value);
+  if(lo>hi){// swap
+    document.getElementById('range-lo').value=hi;
+    document.getElementById('range-hi').value=lo;
+    var t=lo;lo=hi;hi=t;
+  }
+  var max=parseInt(document.getElementById('range-hi').max);
+  document.getElementById('val-lo').textContent=lo>=3600?'3600s+':lo+'s';
+  document.getElementById('val-hi').textContent=hi>=3600?'∞':hi+'s';
+  var fillPct=function(v){return 100*v/max+'%';};
+  var fill=document.getElementById('slider-fill');
+  fill.style.left=fillPct(lo);
+  fill.style.width=(100*(hi-lo)/max)+'%';
+  // 120s marker position
+  var mk=document.getElementById('marker-120');
+  mk.style.left='calc('+fillPct(120)+' - 1px)';
+  renderVisible();
+}
+// Init slider
+(function(){
+  var max=3600;
+  var fill=document.getElementById('slider-fill');
+  fill.style.left='0%';fill.style.width='100%';
+  var mk=document.getElementById('marker-120');
+  mk.style.left='calc('+(100*120/max)+'% - 1px)';
+  document.getElementById('val-lo').textContent='0s';
+  document.getElementById('val-hi').textContent='∞';
+})();
+
+// ═══════════════════════════════════════════════════════════════════════════
+// POLYGON DRAW
+// ═══════════════════════════════════════════════════════════════════════════
+var CORNER_COLORS=['#FFA726','#EF5350','#66BB6A','#42A5F5','#AB47BC','#26C6DA','#FFEE58','#FF7043','#78909C'];
+
+function startDraw(){
+  if(!processed.length){alert('Load a CSV first.');return;}
+  clearPolygon();
+  drawMode=true;
+  drawTempPts=[];
+  map.getContainer().style.cursor='crosshair';
+  document.getElementById('map-hint').style.display='block';
+  document.getElementById('draw-status').style.display='block';
+  updateDrawStatus();
+}
+
+map.on('click',function(e){
+  if(!drawMode) return;
+  drawTempPts.push([e.latlng.lat,e.latlng.lng]);
+  updateDrawPreview();
+});
+
+map.on('dblclick',function(e){
+  if(!drawMode) return;
+  L.DomEvent.stop(e);
+  finishDraw();
+});
+
+document.addEventListener('keydown',function(e){
+  if(e.key==='Enter'&&drawMode) finishDraw();
+  if(e.key==='Escape'&&drawMode) cancelDraw();
+});
+
+function updateDrawPreview(){
+  drawTempMarkers.forEach(function(m){map.removeLayer(m);});
+  drawTempMarkers=[];
+  if(drawTempLine){map.removeLayer(drawTempLine);drawTempLine=null;}
+  drawTempPts.forEach(function(pt,i){
+    var m=L.circleMarker(pt,{radius:6,color:'#66BB6A',fillColor:'#A5D6A7',fillOpacity:1,weight:2}).addTo(map);
+    drawTempMarkers.push(m);
+  });
+  if(drawTempPts.length>1){
+    var pts=drawTempPts.concat([drawTempPts[0]]);
+    drawTempLine=L.polyline(pts,{color:'#66BB6A',weight:2,dashArray:'6,4'}).addTo(map);
+  }
+  updateDrawStatus();
+}
+
+function updateDrawStatus(){
+  var el=document.getElementById('draw-status');
+  if(drawTempPts.length===0) el.textContent='Click on the map to place vertices';
+  else el.textContent=drawTempPts.length+' vertices placed — double-click or Enter to close';
+}
+
+function finishDraw(){
+  if(drawTempPts.length<3){alert('Need at least 3 points to form a region.');return;}
+  polygonPts=drawTempPts.slice();
+  cancelDraw();
+  buildPolygon();
+  updateRegionFlags();
+  document.getElementById('btn-edit-poly').style.display='';
+  document.getElementById('btn-clear-poly').style.display='';
+  document.getElementById('btn-copy-poly').style.display='';
+  document.getElementById('poly-coords').style.display='';
+  document.getElementById('no-poly-warn').style.display='none';
+  updatePolyCoordDisplay();
+  renderVisible();
+}
+
+function cancelDraw(){
+  drawMode=false;
+  drawTempMarkers.forEach(function(m){map.removeLayer(m);});
+  drawTempMarkers=[];
+  if(drawTempLine){map.removeLayer(drawTempLine);drawTempLine=null;}
+  map.getContainer().style.cursor='';
+  document.getElementById('map-hint').style.display='none';
+  document.getElementById('draw-status').style.display='none';
+}
+
+function clearPolygon(){
+  polygonPts=[];
+  if(polyLayer){map.removeLayer(polyLayer);polyLayer=null;}
+  removeCornerMarkers();
+  editPolyMode=false;
+  document.getElementById('btn-edit-poly').style.display='none';
+  document.getElementById('btn-clear-poly').style.display='none';
+  document.getElementById('btn-copy-poly').style.display='none';
+  document.getElementById('poly-coords').style.display='none';
+  document.getElementById('no-poly-warn').style.display='';
+  document.getElementById('btn-edit-poly').textContent='Edit Corners';
+  updateRegionFlags();
+  renderVisible();
+}
+
+function buildPolygon(){
+  if(polyLayer){map.removeLayer(polyLayer);}
+  polyLayer=L.polygon(polygonPts,{
+    color:'#2196F3',weight:2.5,fillColor:'#1565C0',fillOpacity:0.1,dashArray:'8,4'
+  }).addTo(map);
+  polyLayer.bindPopup('<b>PTT Talk Group Region</b><br>'+polygonPts.length+' vertices');
+}
+
+// ─── EDIT MODE ───────────────────────────────────────────────────────────
+var editCornerMarkers=[];
+
+function toggleEditPoly(){
+  editPolyMode=!editPolyMode;
+  var btn=document.getElementById('btn-edit-poly');
+  if(editPolyMode){
+    btn.textContent='Done Editing';
+    btn.className='btn btn-green';
+    buildCornerMarkers();
+  } else {
+    btn.textContent='Edit Corners';
+    btn.className='btn btn-grey';
+    removeCornerMarkers();
+  }
+}
+
+function buildCornerMarkers(){
+  removeCornerMarkers();
+  polygonPts.forEach(function(pt,i){
+    var col=CORNER_COLORS[i%CORNER_COLORS.length];
+    var icon=L.divIcon({
+      className:'',
+      html:'<div style="width:16px;height:16px;border-radius:50%;background:'+col+
+           ';border:3px solid #fff;box-shadow:0 0 5px rgba(0,0,0,.8);cursor:grab;"></div>',
+      iconSize:[16,16],iconAnchor:[8,8]
+    });
+    var m=L.marker(pt,{icon:icon,draggable:true,zIndexOffset:1000}).addTo(map);
+    m.bindTooltip('Corner '+(i+1)+': '+pt[0].toFixed(4)+', '+pt[1].toFixed(4),{direction:'top'});
+    m.on('drag',function(e){
+      var ll=e.target.getLatLng();
+      polygonPts[i]=[+ll.lat.toFixed(5),+ll.lng.toFixed(5)];
+      buildPolygon();
+    });
+    m.on('dragend',function(){
+      updateRegionFlags(); updatePolyCoordDisplay(); renderVisible();
+    });
+    editCornerMarkers.push(m);
+  });
+}
+
+function removeCornerMarkers(){
+  editCornerMarkers.forEach(function(m){map.removeLayer(m);});
+  editCornerMarkers=[];
+}
+
+// ─── POINT-IN-POLYGON ────────────────────────────────────────────────────
+function pip(lat,lng,poly){
+  if(poly.length<3) return true;
+  var n=poly.length,inside=false,x=lng,y=lat,j=n-1;
+  for(var i=0;i<n;i++){
+    var xi=poly[i][1],yi=poly[i][0],xj=poly[j][1],yj=poly[j][0];
+    if(((yi>y)!=(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi)) inside=!inside;
+    j=i;
+  }
+  return inside;
+}
+
+function updateRegionFlags(){
+  if(polygonPts.length<3){
+    processed.forEach(function(r){r.inRegion=true;});
+  } else {
+    processed.forEach(function(r){r.inRegion=pip(r.lat,r.lng,polygonPts);});
+  }
+}
+
+function updatePolyCoordDisplay(){
+  var el=document.getElementById('poly-coords');
+  el.textContent=polygonPts.map(function(p,i){
+    return'C'+(i+1)+': '+p[0].toFixed(4)+'°N, '+Math.abs(p[1]).toFixed(4)+'°W';
+  }).join('  |  ');
+}
+
+function copyPolyCoords(){
+  var txt=polygonPts.map(function(p,i){
+    return'Corner '+(i+1)+': '+p[0].toFixed(5)+', '+p[1].toFixed(5);
+  }).join('\n');
+  navigator.clipboard&&navigator.clipboard.writeText(txt);
+  document.getElementById('btn-copy-poly').textContent='✓ Copied!';
+  setTimeout(function(){document.getElementById('btn-copy-poly').textContent='📋 Copy region coordinates';},2000);
+}
+</script>
+</body>
+</html>
